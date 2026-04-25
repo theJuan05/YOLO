@@ -44,10 +44,9 @@ model = None
 def get_model():
     global model
     if model is None:
-        model = YOLO("best_final.pt")
+        model_path = os.path.join(os.path.dirname(__file__), "best_final.pt")
+        model = YOLO(model_path)
     return model
-
-
 target_names = {
     0: "With Mask",
     1: "No Mask",
