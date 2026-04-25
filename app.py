@@ -2,6 +2,7 @@ import os
 import cv2
 import time
 import json
+import traceback
 from flask import Flask, render_template, request
 from ultralytics import YOLO
 
@@ -12,7 +13,6 @@ app = Flask(__name__)
 # =========================
 STATS_FILE = "stats.json"
 
-# Create stats file if missing (IMPORTANT FIX)
 if not os.path.exists(STATS_FILE):
     with open(STATS_FILE, "w") as f:
         json.dump({"total_mask": 0, "total_no_mask": 0, "total_scans": 0}, f)
@@ -37,7 +37,7 @@ def save_stats(mask, no_mask):
 
 
 # =========================
-# MODEL (LAZY LOADING)
+# MODEL (LAZY LOAD)
 # =========================
 model = None
 
@@ -65,86 +65,92 @@ def home():
 
 
 # =========================
-# PREDICT ROUTE
+# PREDICT ROUTE (DEBUG FIXED)
 # =========================
 @app.route("/predict", methods=["POST"])
 def predict():
 
-    if "image" not in request.files:
-        return "No file uploaded", 400
-
-    file = request.files["image"]
-
-    if file.filename == "":
-        return "No file selected", 400
-
-    os.makedirs("static", exist_ok=True)
-
-    filepath = os.path.join("static", file.filename)
-    file.save(filepath)
-
-    # =========================
-    # IMAGE VALIDATION
-    # =========================
-    img = cv2.imread(filepath)
-    if img is None:
-        return "Invalid image upload", 400
-
-    img = cv2.resize(img, (640, 640))
-    cv2.imwrite(filepath, img)
-
-    # =========================
-    # YOLO PREDICTION (FIXED)
-    # =========================
-    model_instance = get_model()
-
     try:
+        # -------------------------
+        # CHECK FILE
+        # -------------------------
+        if "image" not in request.files:
+            return "No file uploaded", 400
+
+        file = request.files["image"]
+
+        if file.filename == "":
+            return "No file selected", 400
+
+        os.makedirs("static", exist_ok=True)
+
+        filepath = os.path.join("static", file.filename)
+        file.save(filepath)
+
+        # -------------------------
+        # IMAGE VALIDATION
+        # -------------------------
+        img = cv2.imread(filepath)
+        if img is None:
+            return "Invalid image upload", 400
+
+        img = cv2.resize(img, (640, 640))
+        cv2.imwrite(filepath, img)
+
+        # -------------------------
+        # YOLO MODEL
+        # -------------------------
+        model_instance = get_model()
+
         results = model_instance.predict(
             source=filepath,
             conf=0.4,
             imgsz=640,
             verbose=False
         )
+
+        if results is None or len(results) == 0:
+            return "YOLO failed", 500
+
+        results[0].names = target_names
+
+        # -------------------------
+        # COUNT RESULTS
+        # -------------------------
+        mask_count = 0
+        no_mask_count = 0
+
+        if results[0].boxes is not None:
+            for c in results[0].boxes.cls:
+                if int(c) == 0:
+                    mask_count += 1
+                else:
+                    no_mask_count += 1
+
+        # -------------------------
+        # SAVE STATS
+        # -------------------------
+        overall_stats = save_stats(mask_count, no_mask_count)
+
+        # -------------------------
+        # SAVE IMAGE
+        # -------------------------
+        annotated_frame = results[0].plot()
+        if annotated_frame is not None:
+            cv2.imwrite(filepath, annotated_frame)
+
+        return render_template(
+            "index.html",
+            image=file.filename,
+            mask=mask_count,
+            no_mask=no_mask_count,
+            stats=overall_stats,
+            v=time.time()
+        )
+
     except Exception as e:
-        return f"YOLO error: {str(e)}", 500
-
-    if results is None or len(results) == 0:
-        return "YOLO failed", 500
-
-    results[0].names = target_names
-
-    # =========================
-    # COUNT RESULTS
-    # =========================
-    mask_count = 0
-    no_mask_count = 0
-
-    if results[0].boxes is not None:
-        for c in results[0].boxes.cls:
-            if int(c) == 0:
-                mask_count += 1
-            else:
-                no_mask_count += 1
-
-    # Save stats
-    overall_stats = save_stats(mask_count, no_mask_count)
-
-    # =========================
-    # SAVE OUTPUT IMAGE
-    # =========================
-    annotated_frame = results[0].plot()
-
-    if annotated_frame is not None:
-        cv2.imwrite(filepath, annotated_frame)
-
-    return render_template(
-        "index.html",
-        image=file.filename,
-        mask=mask_count,
-        no_mask=no_mask_count,
-        stats=overall_stats,
-        v=time.time()
-    )
+        print(traceback.format_exc())  # THIS SHOWS REAL ERROR IN RENDER LOGS
+        return f"SERVER ERROR: {str(e)}", 500
 
 
 # =========================
