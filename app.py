@@ -25,61 +25,81 @@ def save_stats(mask, no_mask):
         json.dump(stats, f)
     return stats
 
-# 1. Load Model & Fix Metadata
+# Load Model
 model = YOLO("best_final.pt")
-target_names = {0: 'With Mask', 1: 'No Mask', 2: 'No Mask'}
 
-# Update model internal dictionaries to avoid KeyError: 2
+target_names = {
+    0: 'With Mask',
+    1: 'No Mask',
+    2: 'No Mask'
+}
+
+# Fix metadata
 if hasattr(model, 'model') and hasattr(model.model, 'names'):
     model.model.names = target_names
+
 model.names.update(target_names)
 
 @app.route("/")
 def home():
-    stats = load_stats() 
+    stats = load_stats()
     return render_template("index.html", stats=stats)
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    if 'image' not in request.files: return "No file", 400
-    file = request.files["image"]
-    
-    if file.filename == '': return "No selection", 400
+    if 'image' not in request.files:
+        return "No file", 400
 
-    if not os.path.exists('static'): os.makedirs('static')
+    file = request.files["image"]
+
+    if file.filename == '':
+        return "No selection", 400
+
+    # Ensure static folder exists
+    if not os.path.exists('static'):
+        os.makedirs('static')
+
     filepath = os.path.join('static', file.filename)
     file.save(filepath)
 
-    # 2. Run detection (verbose=False prevents terminal clutter/crashes)
-    results = model.predict(source=filepath, conf=0.4, verbose=False)
+    # Run detection
+    results = model.predict(
+        source=filepath,
+        conf=0.4,
+        verbose=False
+    )
+
     results[0].names = target_names
 
     mask_count = 0
     no_mask_count = 0
-    
+
     if results[0].boxes is not None:
         for c in results[0].boxes.cls:
             class_id = int(c)
-            # 0=With Mask, 1 & 2=No Mask/Incorrect
-            if class_id == 0: 
+
+            if class_id == 0:
                 mask_count += 1
-            else: 
+            else:
                 no_mask_count += 1
 
-    # 3. Save to storage
+    # Save statistics
     overall_stats = save_stats(mask_count, no_mask_count)
 
-    # 4. Save result image
-    annotated_frame = results[0].plot() 
-    cv2.imwrite(filepath, annotated_frame) 
+    # Save annotated image
+    annotated_frame = results[0].plot()
+    cv2.imwrite(filepath, annotated_frame)
 
-    return render_template("index.html", 
-                           image=file.filename, 
-                           mask=mask_count, 
-                           no_mask=no_mask_count,
-                           stats=overall_stats, 
-                           v=time.time())
+    return render_template(
+        "index.html",
+        image=file.filename,
+        mask=mask_count,
+        no_mask=no_mask_count,
+        stats=overall_stats,
+        v=time.time()
+    )
 
+# IMPORTANT: Render-compatible run setup
 if __name__ == "__main__":
-    # CRITICAL: use_reloader=False stops the infinite restart loop on Windows
-    app.run(debug=True, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
