@@ -12,10 +12,12 @@ app = Flask(__name__)
 # =========================
 STATS_FILE = "stats.json"
 
-def load_stats():
-    if not os.path.exists(STATS_FILE):
-        return {"total_mask": 0, "total_no_mask": 0, "total_scans": 0}
+# Create stats file if missing (IMPORTANT FIX)
+if not os.path.exists(STATS_FILE):
+    with open(STATS_FILE, "w") as f:
+        json.dump({"total_mask": 0, "total_no_mask": 0, "total_scans": 0}, f)
 
+def load_stats():
     try:
         with open(STATS_FILE, "r") as f:
             return json.load(f)
@@ -35,7 +37,7 @@ def save_stats(mask, no_mask):
 
 
 # =========================
-# MODEL (LAZY LOADING FIX)
+# MODEL (LAZY LOADING)
 # =========================
 model = None
 
@@ -67,6 +69,7 @@ def home():
 # =========================
 @app.route("/predict", methods=["POST"])
 def predict():
+
     if "image" not in request.files:
         return "No file uploaded", 400
 
@@ -75,7 +78,6 @@ def predict():
     if file.filename == "":
         return "No file selected", 400
 
-    # Ensure static folder exists
     os.makedirs("static", exist_ok=True)
 
     filepath = os.path.join("static", file.filename)
@@ -92,14 +94,19 @@ def predict():
     cv2.imwrite(filepath, img)
 
     # =========================
-    # YOLO PREDICTION
+    # YOLO PREDICTION (FIXED)
     # =========================
-    results = get_model().predict(
-        source=filepath,
-        conf=0.4,
-        imgsz=640,
-        verbose=False
-    )
+    model_instance = get_model()
+
+    try:
+        results = model_instance.predict(
+            source=filepath,
+            conf=0.4,
+            imgsz=640,
+            verbose=False
+        )
+    except Exception as e:
+        return f"YOLO error: {str(e)}", 500
 
     if results is None or len(results) == 0:
         return "YOLO failed", 500
@@ -141,7 +148,7 @@ def predict():
 
 
 # =========================
-# RUN APP (RENDER READY)
+# RUN APP
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
