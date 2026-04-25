@@ -124,7 +124,7 @@ def predict():
             return "Invalid image upload", 400
 
         # Resize smaller (IMPORTANT MEMORY FIX)
-        img = cv2.resize(img, (320, 320))
+        img = cv2.resize(img, (256, 256))
 
         cv2.imwrite(filepath, img)
 
@@ -136,7 +136,7 @@ def predict():
         results = model_instance.predict(
             source=filepath,
             conf=0.4,
-            imgsz=320,
+            imgsz=256,
             device="cpu",
             verbose=False
         )
